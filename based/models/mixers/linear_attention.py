@@ -141,11 +141,11 @@ class LinearAttention(nn.Module):
             if inference_params.seqlen_offset > 0: 
                 # recurrent
                 kv_state, k_state = self._get_inference_cache(inference_params)
-                q, k = self.feature_map(q), self.feature_map(k)
+                q, k = self.feature_map(q), self.feature_map(k)  # BHL(1+F+F*F), BHL(1+F+F*F)
                 return self.recurrent_forward(hidden_states, kv_state, k_state, q, k, v)
             else:  
                 # prefill
-                y, kv_state, k_state = self.parallel_forward(hidden_states, q, k, v)  # BLD, BH1D'(1+F+F*F), BH(1+F+F*F)11
+                y, kv_state, k_state = self.parallel_forward(hidden_states, q, k, v)  # BLD, BH1D'(1+F+F*F), BH11(1+F+F*F)
                 print("kv_state: ", kv_state.shape)
                 print("k_state: ", k_state.shape)
                 print("qkv:", q.shape, k.shape, v.shape)
@@ -236,7 +236,7 @@ class LinearAttention(nn.Module):
 
         if self.is_inference and self.parallel_implementation != "tk":
             kv_state = torch.einsum("bhnd,bhnf->bhfd", k, v)[:, :, None]  # BH1D'(1+F+F*F)
-            k_state = k.sum(dim=2)[:, :, None, None]  # BH(1+F+F*F)11
+            k_state = k.sum(dim=2)[:, :, None, None]  # BH11(1+F+F*F)
 
         if self.is_inference:
             # inference
@@ -252,18 +252,18 @@ class LinearAttention(nn.Module):
         -> Assume q.shape is (b, h, 1, d); k and v.shape are (b, h, l, d)
 
         kv_state: BH1D'(1+F+F*F)
-        k_state: BH(1+F+F*F)11
-        q: BHLF
-        k: BHLF
-        v: BHLD'
+        k_state:  BH11(1+F+F*F)
+        q:        BHL(1+F+F*F)
+        k:        BHL(1+F+F*F)
+        v:        BHLD'
         """
         b, h, l, d = q.shape
         assert l == 1, f'q.shape is {q.shape} but should be ({b}, {h}, 1, {d})'
         # Expand dims for broadcasting to compute linear attention
-        q, k, v = q.unsqueeze(-2), k.unsqueeze(-2), v.unsqueeze(-1)  # BHL1F, BHL1F, BHLD'1
+        q, k, v = q.unsqueeze(-2), k.unsqueeze(-2), v.unsqueeze(-1)  # BHL1(1+F+F*F), BHL1(1+F+F*F), BHLD'1
 
         kv_state += k[:, :, -1:] * v[:, :, -1:]  # BH1D'(1+F+F*F)
-        k_state  += k[:, :, -1:]  # ???
+        k_state  += k[:, :, -1:]  # BH11(1+F+F*F)
 
         # Compute linear attention
         num = (q * kv_state).sum(dim=-1)
