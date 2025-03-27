@@ -75,9 +75,9 @@ class Block(nn.Module):
             mixer_cls = partial(MHA, num_heads=dim // 64)
         if mlp_cls is None:
             mlp_cls = partial(Mlp, hidden_features=4 * dim)
-        self.mixer = mixer_cls(dim)
+        self.mixer = mixer_cls(dim)  # 这里会调用 mixer_cls 完成最终初始化
         self.dropout1 = dropout_cls(resid_dropout1)
-        self.drop_path1 = StochasticDepth(drop_path1, mode="row")
+        self.drop_path1 = StochasticDepth(drop_path1, mode="row")  # 以一定概率随机跳过某些层来防止过拟合
         self.norm1 = norm_cls(dim)
         self.mlp = mlp_cls(dim)
         if not isinstance(self.mlp, nn.Identity):

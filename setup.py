@@ -16,7 +16,7 @@ _REQUIRED = [
     "aiohttp", # https://github.com/aio-libs/aiohttp/issues/6794
     "dill==0.3.6",
     "multiprocess==0.70.14",
-    "huggingface-hub==0.19.4",
+    "huggingface-hub>=0.19.4",
     "transformers==4.36.2",
     "einops==0.7.0",
     "ftfy==6.1.3",

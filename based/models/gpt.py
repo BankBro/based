@@ -62,6 +62,12 @@ class GPT2MixerConfig(GPT2Config):
 
 
 def create_mixer_cls(config, layer_idx=None, process_group=None, device=None, dtype=None):
+    """
+    主 Mixer 使用卷积机制。
+    替代 Mixer 1 使用线性注意力机制。
+    替代 Mixer 2 使用滑动窗口注意力机制。
+    对于未指定的层，回退到默认的多头自注意力机制。
+    """
     tag = 'mixer'
     value = getattr(config, "mixer", None) 
     alt_mixer_layers = getattr(config, "alt_mixer_layers", None)
@@ -89,7 +95,7 @@ def create_mixer_cls(config, layer_idx=None, process_group=None, device=None, dt
 
     return hydra.utils.instantiate(
         value, 
-        _partial_=True, 
+        _partial_=True,  # _partial_ 的作用是延迟初始化，返回一个部分初始化的实例。
         device=device, 
         dtype=dtype, 
         layer_idx=layer_idx,
@@ -486,6 +492,10 @@ def _init_weights(module, n_layer, initializer_range=0.02, rescale_prenorm_resid
 
 
 class DecayClass(nn.Module):
+    """
+    主要功能是生成一个衰减掩码(decay mask), 用于控制模型中注意力机制的行为,
+    通过引入衰减因子可以有效减少远距离 token 对当前 token 的影响, 从而提高模型的效率和性能
+    """
     def __init__(self, config):
         super().__init__()
         self.l_max = config.mixer.get('l_max', None)
@@ -512,7 +522,7 @@ class GPTModel(GPTPreTrainedModel):
     def __init__(self, config: GPT2Config, process_group=None, device=None, dtype=None):
         super().__init__(config)
         factory_kwargs = {"device": device, "dtype": dtype}
-        self.process_group = process_group
+        self.process_group = process_group  # 进程组, 并行化
         self.sequence_parallel = getattr(config, "sequence_parallel", True)
         assert config.activation_function in [
             "gelu",
@@ -539,12 +549,12 @@ class GPTModel(GPTPreTrainedModel):
         # For GPT-J, GPT-NeoX
         self.parallel_block = getattr(config, "parallel_block", False)
 
-        if process_group is None:
+        if process_group is None:  # 非并行化
             self.embeddings = GPT2Embeddings(
                 config.hidden_size,
                 vocab_size,
-                config.max_position_embeddings,
-                word_embed_proj_dim=word_embed_proj_dim,
+                config.max_position_embeddings,  # 模型支持的最大位置长度
+                word_embed_proj_dim=word_embed_proj_dim,  # 控制词嵌入的投影维度
                 **factory_kwargs,
             )
         else:
@@ -580,13 +590,14 @@ class GPTModel(GPTPreTrainedModel):
             norm_cls = nn.LayerNorm if not use_rms_norm else RMSNorm
             self.ln_f = norm_cls(
                 config.hidden_size, eps=config.layer_norm_epsilon, **factory_kwargs
-            )
+            )  # layer_norm_epsilon 是一个小常数, 用于防止数值计算中的不稳定性
         if process_group is not None:
             for p in self.ln_f.parameters():
                 # Mark the norm parameters as "shared_params" so that we sync their values at init.
                 p._shared_params = True
                 # Mark the norm params as "sequence_parallel" so we run all-reduce on their grads.
                 if self.sequence_parallel:
+                    # 序列并行是一种优化技允许在分布式训练中对序列维度（如输入的 token 长度）进行分割
                     p._sequence_parallel = True
         
         if getattr(config, "special_initializer", False):
@@ -595,7 +606,7 @@ class GPTModel(GPTPreTrainedModel):
             initializer_range = config.initializer_range
 
         if getattr(config, 'fixed_decay', False):
-            self.decay = DecayClass(config)
+            self.decay = DecayClass(config)  # ???
         else:
             self.decay = None
 
@@ -657,7 +668,9 @@ class GPTModel(GPTPreTrainedModel):
                     layer_name = layer.mixer.__class__.__name__
                 except:
                     layer_name = "MHA"
+
                 assert hidden_states is not None, "Hidden states are None"
+
                 if not self.parallel_block and layer_name not in ['MHA']:
                     hidden_states, residual = layer(
                         hidden_states, residual=residual, position_ids=position_ids, decay=decay, mixer_kwargs=mixer_kwargs
@@ -668,11 +681,14 @@ class GPTModel(GPTPreTrainedModel):
                     hidden_states, hidden_states2, residual = layer(
                         hidden_states, hidden_states2, residual=residual, position_ids=position_ids, decay=decay, mixer_kwargs=mixer_kwargs
                     )
+
                 assert hidden_states is not None, "Hidden states are None"
+
             else:
                 assert hidden_states is not None, "Hidden states are None"
                 hidden_states = layer(hidden_states, position_ids=position_ids, mixer_kwargs=mixer_kwargs)
                 assert hidden_states is not None, "Hidden states are None"
+        
         if self.prenorm:
             if not self.fused_dropout_add_ln:
                 assert hidden_states is not None, "Hidden states are None"

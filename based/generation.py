@@ -22,7 +22,7 @@ class InferenceParams:
 
     max_seqlen: int
     max_batch_size: int
-    seqlen_offset: int = 0
+    seqlen_offset: int = 0  # 当前推理阶段中已处理的序列长度偏移量
     batch_size_offset: int = 0
     key_value_memory_dict: dict = field(default_factory=dict)
     lengths_per_sample: Optional[Tensor] = None

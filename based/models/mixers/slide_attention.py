@@ -315,7 +315,8 @@ class SlidingAttention(nn.Module):
             to fuse the backward of nn.Linear with the residual connection.
         """
         # SA hardcode
-        use_flash_attn = True
+        # use_flash_attn = True
+        use_flash_attn = False
         causal = True
 
         factory_kwargs = {"device": device, "dtype": dtype}
