@@ -85,7 +85,7 @@ class LinearAttention(nn.Module):
         num_heads: int = 16,    # H: 多头注意力的头的数量
         eps: float = 1e-12,
         layer_idx: int = None,
-        parallel_implementation: str="quadratic",
+        parallel_implementation: str="quadratic",  # "linear", "quadratic"
         **kwargs
     ):
         super().__init__()
