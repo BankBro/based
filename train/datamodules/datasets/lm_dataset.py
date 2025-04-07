@@ -15,12 +15,13 @@ class LMDataset(torch.utils.data.Dataset):
         self.seq_len = seq_len
         ntokens = len(tokens)
         if drop_last:
-            ntokens = ((ntokens - 1) // seq_len) * seq_len + 1
+            # 确保最后一个子序列的长度是完整的
+            ntokens = ((ntokens - 1) // seq_len) * seq_len + 1  # + 1：保留最后一个 token 作为目标序列的一部分
         self.ntokens = ntokens
         # We're careful not to slice tokens, since it could be a memmap'ed array or H5 dataset,
         # and slicing would load it to memory.
         self.tokens = tokens
-        self.total_sequences = math.ceil((self.ntokens - 1) / self.seq_len)
+        self.total_sequences = math.ceil((self.ntokens - 1) / self.seq_len)  # 子序列数量, math.ceil向上取整, 确保最后一个不完整的子序列也被包含
 
     def __len__(self):
         return self.total_sequences

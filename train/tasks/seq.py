@@ -14,6 +14,8 @@ from train.utils.utils import get_logger
 from train.optim.param_grouping import group_parameters_for_optimizer
 from train.utils.checkpoint import load_checkpoint
 
+from based.models.mixers.transformer_vq.utils.dict import average_nested_dicts
+
 logger = get_logger(__name__)
 
 
@@ -175,12 +177,42 @@ class SequenceModel(LightningModule):
 
 
 class SequenceLMModel(SequenceModel):
+    def init_vq_state(self, batch_size:int):
+        for layer in self.model.transformer.layers:
+            if layer.__class__.__name__ == 'TransVQAttention':
+                layer.initial_state(batch_size)
+
+    def get_vq_loss_metrics(self):
+        vq_loss_metrics = []
+        for layer in self.model.transformer.layers:
+            if layer.__class__.__name__ == 'TransVQAttention':
+                vq_loss_metrics.append(layer.vq_loss_metrics)
+
+        vq_loss_metrics = average_nested_dicts(vq_loss_metrics)
+
+        vq_metrics_dict = vq_loss_metrics.pop('metrics')
+        vq_loss_dict = vq_loss_metrics
+
+        return vq_loss_dict, vq_metrics_dict
+
+    def get_c_beta(self):
+        c_beta = None
+
+        for layer in self.model.transformer.layers:
+            if layer.__class__.__name__ == 'TransVQAttention':
+                c_beta = layer.c_beta
+                break
+
+        return c_beta
 
     def step(self, batch: Any, is_train=True):
         if len(batch) == 3:
             x, y, _ = batch
         else:
             x, y = batch
+
+        self.init_vq_state(x.shape[0])
+
         output = self.forward(x).logits
         output = rearrange(output, '... C -> (...) C')
         y = rearrange(y, '... -> (...)')
@@ -189,10 +221,14 @@ class SequenceLMModel(SequenceModel):
 
     def shared_step(self, batch: Any, batch_idx: int, phase='train'):
         loss, output, targets = self.step(batch, is_train=(phase == 'train'))
+        
         # Passing the loss to the perplexity metrics to avoid recomputation
         metrics = getattr(self, f'{phase}_metrics')
         metrics(output, targets, loss=loss)
+        vq_loss_dict, vq_metrics_dict = self.get_vq_loss_metrics()
+        
         log_on_step = 'eval' in self.cfg and self.cfg.eval.get('log_on_step', False) and phase == 'train'
+
         # print(f"{batch_idx=},{loss=},{self.trainer.global_step=}")
         self.log(f"{phase}/loss", loss, on_step=log_on_step, on_epoch=True,
                  prog_bar=False, sync_dist=True)
@@ -201,7 +237,16 @@ class SequenceLMModel(SequenceModel):
         # pytorch-lightning will use torch.mean to reduce it.
         # This would be wrong for perplexity, for example.
         self.log_dict(metrics, on_step=log_on_step, on_epoch=True, prog_bar=True, sync_dist=True)
-        return {"loss": loss, "output": output, "targets": targets}
+
+        # Log VQ metrics
+        self.log_dict({f"{phase}/{k}": v for k, v in vq_loss_dict.items()},
+                      on_step=log_on_step, on_epoch=True, prog_bar=False, sync_dist=True)
+        self.log_dict({f"{phase}/{k}": v for k, v in vq_metrics_dict.items()},
+                      on_step=log_on_step, on_epoch=True, prog_bar=False, sync_dist=True)
+        
+        c_beta = self.get_c_beta()
+        total_loss = loss + c_beta * vq_loss_dict['l_commit'] + vq_loss_dict['l_codebook']
+        return {"loss": total_loss, "output": output, "targets": targets}
 
 
 

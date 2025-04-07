@@ -285,7 +285,7 @@ class LMDataModule(LightningDataModule):
             num_workers=1,  # Data is already in memory, we don't need many workers
             shuffle=shuffle,
             sampler=sampler,
-            drop_last=self.drop_last,
+            drop_last=self.drop_last,  # True: 丢弃最后一个不足batch_size的batch
             pin_memory=self.pin_memory,
             # persistent_workers=True
         )

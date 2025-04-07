@@ -2,7 +2,6 @@ import dataclasses
 import torch
 import torch.nn as nn
 from transformer_vq.nn.attn import VQAttention
-from transformer_vq.nn.emb import Embeddings
 from transformer_vq.nn.norm import LayerNorm
 from transformer_vq.nn.pe import ScaledSin
 from transformer_vq.nn.types import TransformerConfig
@@ -106,7 +105,7 @@ class TransformerLayer(nn.Module):
         ])
 
         return dict(
-            output_features=x,
+            output_features=x,  # FBLD
             attn_state=[new_state1, new_state2],
             l_commit=l_commit,
             l_codebook=l_codebook,
@@ -114,46 +113,31 @@ class TransformerLayer(nn.Module):
         )
 
 
-class Transformer(nn.Module):
-    def __init__(self, config: TransformerConfig):
+class TransVQAttention(nn.Module):
+    def __init__(self, d_model: int, **kwargs):
         super().__init__()
-        self.config = config
-        self.apply_config()
-        
-        # 初始化嵌入层
-        if not self.no_emb or self.e_tie:
-            self.token_embedder = Embeddings(self.config)
-        
-        # 位置编码
-        if self.pe_abs:
-            self.position_embedder = ScaledSin(self.config)
-        
-        # 初始化Transformer层
-        self.transformer_layers = nn.ModuleList([
-            TransformerLayer(self.config) for _ in range(self.n_layer)
-        ])
-        
-        # 输出层
-        if self.e_preln:
-            self.out_ln = LayerNorm(self.d_model, self.param_dtype)
-        
-        # 不共享嵌入层
-        if not self.e_tie:
-            self.out_proj = nn.Linear(self.d_model, self.n_vocab)
-        
-        # Dropout
-        self.dropemb = nn.Dropout(self.p_dropemb)
+        self.config = TransformerConfig.create(d_model=d_model, **kwargs)
+        self.apply_all_params(**kwargs)
+        self.param_dtype = self.dtype
+        self.config.param_dtype = self.param_dtype
 
-    def apply_config(self):
-        for k, v in dataclasses.asdict(self.config).items():
-            setattr(self, k, v)
-    
-    @staticmethod
-    def initial_state(config, batch_size):
-        return [
-            TransformerLayer.initial_state(config, batch_size)
-            for _ in range(config.n_layer)
-        ]
+        self.vq_layer = TransformerLayer(self.config)
+        self.state = None
+        self.loss_metrics = None
+
+    def apply_all_params(self, **kwargs):
+        config_field_names = {
+            field.name for field in dataclasses.fields(TransformerConfig)
+        }
+
+        for k, v in kwargs.items():
+            if k in config_field_names:
+                setattr(self, k, getattr(self.config, k))
+            else:
+                setattr(self, k, v)
+
+    def initial_state(self, batch_size):
+        self.state = TransformerLayer.initial_state(self.config, batch_size)
 
     def get_blocks_from_sequence(self, x):
         """将序列分割为块"""
@@ -197,61 +181,40 @@ class Transformer(nn.Module):
             loss_mask=loss_mask  # FBL
         )
 
-    def forward(self, inputs, doc_ids, state, vq_spec):
+    def forward(self, inputs):
+        """inputs: BUD, 输入长度T默认等于U, 下面用U代替T"""
+        assert inputs.shape[1] % self.block_len == 0
+
         B, U = inputs.shape[0], inputs.shape[1]
         L, D = self.block_len, self.d_model
-        F = U // L
-        C = self.n_vocab
+        F = U // L  # n_block_per_update
 
-        x = inputs  # BU*
-        
-        if not self.no_emb:
-            x = self.token_embedder(x)  # BUD
+        x_blocks = self.get_blocks_from_sequence(inputs)  # FBLD
+        check_tensor_shape(x_blocks, (F, B, L, D))
 
-        if self.pe_abs:
-            offset = state[0][0]["pos_offset"]
-            emb = self.position_embedder(x.size(1), offset)  # UD
-            x = x + emb  # BUD
-        
-        x = self.dropemb(x)  # BUD
-        x_blocks = self.get_blocks_from_sequence(x)  # FBLD
+        doc_ids = torch.ones([B, U], dtype=torch.int32)  # BU
         doc_ids_blocks = self.get_blocks_from_sequence(doc_ids)  # FBL
 
-        new_states = []
-        aux = []
-        for i, layer in enumerate(self.transformer_layers):
-            layer_output_dict = layer(
-                x_blocks, # FBLD
-                doc_ids_blocks,  # FBL
-                state[i], 
-                self._adapt_vq_spec(vq_spec, F)
-            )
-            x_blocks = layer_output_dict['output_features']
-            check_tensor_shape(x_blocks, (F, B, L, D))
+        vq_spec = VQSpec.create(
+            n_device=torch.tensor([self.n_device]),  # TODO: n_device
+            n_block_per_update=torch.tensor([F]),
+            loss_mask=torch.ones([B, L], dtype=torch.int32),
+        )
+        vq_spec = self._adapt_vq_spec(vq_spec, F)
 
-            new_states.append(layer_output_dict.pop('attn_state'))
-            aux.append(layer_output_dict)
+        layer_output_dict = self.vq_layer(
+            x_blocks, # FBLD
+            doc_ids_blocks,  # FBL
+            self.state, 
+            vq_spec
+        )
+        self.state = layer_output_dict.pop('attn_state')
 
-        aux = average_nested_dicts(aux)  # dic(l_commit:xxx, l_codebook:xxx, metrics:dic)
-        
-        x = self.get_sequence_from_blocks(x_blocks)  # BUD
-        check_tensor_shape(x, (B, U, D))
+        output_blocks = layer_output_dict.pop('output_features')
+        check_tensor_shape(output_blocks, (F, B, L, D))
+        output = self.get_sequence_from_blocks(output_blocks)  # BUD
+        check_tensor_shape(output_blocks, (B, U, D))
 
-        if self.e_preln:
-            x = self.out_ln(x)  # BUD
-        
-        # 生成logits
-        if self.e_tie:
-            logits = self.token_embedder.logits(x)  # BUC
-        else:
-            self.out_proj(x)  # BUC
-        logits = logits * self.e_scale
+        self.vq_loss_metrics = layer_output_dict
 
-        logprobs = torch.nn.functional.log_softmax(logits, dim=-1)  # BUC
-        check_tensor_shape(logprobs, (B, U, C))
-        
-        return {
-            'logprobs': logprobs,  # BUC
-            'attn_state': new_states,
-            **aux
-        }
+        return output
