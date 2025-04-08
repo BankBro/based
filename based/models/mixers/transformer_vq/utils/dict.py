@@ -1,4 +1,5 @@
 import torch
+from typing import List, Dict
 
 
 def recursive_apply_dict(d, func):
@@ -11,7 +12,7 @@ def recursive_apply_dict(d, func):
     else:
         return d
     
-def average_nested_dicts(dict_list: list[dict]):
+def average_nested_dicts(dict_list: List[Dict]):
     """
     递归地对嵌套字典的值进行平均。
     """

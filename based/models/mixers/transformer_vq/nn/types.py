@@ -12,8 +12,8 @@ Initializer = Callable[..., None]  # TODO
 
 @dataclass
 class TransformerConfig:
-    param_dtype: Dtype      # 模型参数的数据类型，用于初始化和训练过程。
-    dtype: Dtype            # 模型在运行时使用的数据类型，用于前向传播等计算过程。
+    # param_dtype: Dtype      # 模型参数的数据类型，用于初始化和训练过程。
+    # dtype: Dtype            # 模型在运行时使用的数据类型，用于前向传播等计算过程。
     block_len: int          # L (块长度)
     mem_len: int            # M (记忆长度, W = L + M)
     d_model: int            # D (模型隐藏维度)
@@ -30,29 +30,20 @@ class TransformerConfig:
     c_beta: float
     c_gamma: float
     is_train: bool
-    e_init: Initializer
-    w_init: Initializer
-    r_init: Initializer
-    b_init: Initializer
 
     @classmethod
     def create(cls, **kwargs):
         signature = {field.name: field.type for field in fields(TransformerConfig)}
         filtered = {k: v for k, v in kwargs.items() if k in signature}
 
-        if isinstance(filtered["param_dtype"], str):
-            filtered["param_dtype"] = torch.dtype(filtered["param_dtype"])
+        # if isinstance(filtered["param_dtype"], str):
+        #     filtered["param_dtype"] = torch.dtype(filtered["param_dtype"])
 
-        if isinstance(filtered["dtype"], str):
-            filtered["dtype"] = torch.dtype(filtered["dtype"])
+        # if isinstance(filtered["dtype"], str):
+        #     filtered["dtype"] = torch.dtype(filtered["dtype"])
 
         for k, v in filtered.items():
             if signature[k] is bool and v in {0, 1}:
                 filtered[k] = bool(v)
-
-        filtered["e_init"] = lambda tensor: nn.init.normal_(tensor, mean=0.0, std=1.0)
-        filtered["w_init"] = lambda tensor: nn.init.xavier_normal_(tensor, gain=1.0)
-        filtered["r_init"] = lambda tensor: nn.init.xavier_normal_(tensor, gain=1.0)
-        filtered["b_init"] = lambda tensor: nn.init.zeros_(tensor)
 
         return cls(**filtered)

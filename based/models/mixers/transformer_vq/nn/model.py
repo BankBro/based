@@ -1,14 +1,12 @@
 import dataclasses
 import torch
 import torch.nn as nn
-from transformer_vq.nn.attn import VQAttention
-from transformer_vq.nn.norm import LayerNorm
-from transformer_vq.nn.pe import ScaledSin
-from transformer_vq.nn.types import TransformerConfig
-from transformer_vq.nn.vq import VQSpec
+from based.models.mixers.transformer_vq.nn.attn import VQAttention
+from based.models.mixers.transformer_vq.nn.types import TransformerConfig
+from based.models.mixers.transformer_vq.nn.vq import VQSpec
 
-from transformer_vq.utils.tools import check_tensor_shape
-from transformer_vq.utils.dict import average_nested_dicts
+from based.models.mixers.transformer_vq.utils.tools import check_tensor_shape
+from based.models.mixers.transformer_vq.utils.dict import average_nested_dicts
 
 class TransformerLayer(nn.Module):
     def __init__(self, config: TransformerConfig):
@@ -27,10 +25,10 @@ class TransformerLayer(nn.Module):
             setattr(self, k, v)
 
     @staticmethod
-    def initial_state(config, batch_size):
+    def initial_state(config, batch_size, device):
         return [
-            VQAttention.initial_state(config, batch_size),
-            VQAttention.initial_state(config, batch_size)
+            VQAttention.initial_state(config, batch_size, device),
+            VQAttention.initial_state(config, batch_size, device)
         ]
     
     def _adapt_vq_spec(self, vq_spec, n_block):
@@ -116,10 +114,9 @@ class TransformerLayer(nn.Module):
 class TransVQAttention(nn.Module):
     def __init__(self, d_model: int, **kwargs):
         super().__init__()
+        # print(f"TransVQAttention init, d_model={d_model}")
         self.config = TransformerConfig.create(d_model=d_model, **kwargs)
-        self.apply_all_params(**kwargs)
-        self.param_dtype = self.dtype
-        self.config.param_dtype = self.param_dtype
+        self.apply_all_params(**{'d_model': d_model, **kwargs})
 
         self.vq_layer = TransformerLayer(self.config)
         self.state = None
@@ -136,8 +133,8 @@ class TransVQAttention(nn.Module):
             else:
                 setattr(self, k, v)
 
-    def initial_state(self, batch_size):
-        self.state = TransformerLayer.initial_state(self.config, batch_size)
+    def initial_state(self, batch_size, device):
+        self.state = TransformerLayer.initial_state(self.config, batch_size, device)
 
     def get_blocks_from_sequence(self, x):
         """将序列分割为块"""
@@ -192,13 +189,14 @@ class TransVQAttention(nn.Module):
         x_blocks = self.get_blocks_from_sequence(inputs)  # FBLD
         check_tensor_shape(x_blocks, (F, B, L, D))
 
-        doc_ids = torch.ones([B, U], dtype=torch.int32)  # BU
+        doc_ids = torch.ones([B, U], dtype=torch.int32, device=inputs.device)  # BU
         doc_ids_blocks = self.get_blocks_from_sequence(doc_ids)  # FBL
 
+        device = inputs.device
         vq_spec = VQSpec.create(
-            n_device=torch.tensor([self.n_device]),  # TODO: n_device
-            n_block_per_update=torch.tensor([F]),
-            loss_mask=torch.ones([B, L], dtype=torch.int32),
+            n_device=torch.tensor([self.n_device], device=device),  # TODO: n_device
+            n_block_per_update=torch.tensor([F], device=device),
+            loss_mask=torch.ones([B, U], dtype=torch.int32, device=device),
         )
         vq_spec = self._adapt_vq_spec(vq_spec, F)
 
@@ -213,8 +211,10 @@ class TransVQAttention(nn.Module):
         output_blocks = layer_output_dict.pop('output_features')
         check_tensor_shape(output_blocks, (F, B, L, D))
         output = self.get_sequence_from_blocks(output_blocks)  # BUD
-        check_tensor_shape(output_blocks, (B, U, D))
+        check_tensor_shape(output, (B, U, D))
 
         self.vq_loss_metrics = layer_output_dict
 
         return output
+    
+__all__ = ["TransVQAttention"]

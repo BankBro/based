@@ -1,12 +1,11 @@
 import torch
 import torch.nn as nn
-from transformer_vq.nn.types import Dtype
+from based.models.mixers.transformer_vq.nn.types import Dtype
 
 
 class LayerNorm(nn.Module):
     def __init__(self,
                  input_dim: int,
-                 param_dtype: Dtype,
                  center: bool = False,  # RMS norm默认不进行中心化
                  norm: bool = True,
                  gain: bool = True,
@@ -14,16 +13,15 @@ class LayerNorm(nn.Module):
         
         super(LayerNorm, self).__init__()
         self.input_dim = input_dim
-        self.param_dtype = param_dtype
         self.center = center
         self.norm = norm
         self.gain = gain
         self.bias = bias
 
         if self.gain:
-            self.g = nn.Parameter(torch.ones(self.input_dim, dtype=self.param_dtype))
+            self.g = nn.Parameter(torch.ones(self.input_dim))
         if self.bias:
-            self.b = nn.Parameter(torch.zeros(self.input_dim, dtype=self.param_dtype))
+            self.b = nn.Parameter(torch.zeros(self.input_dim))
 
     def forward(self, x, eps=1e-6):
         dtype = x.dtype

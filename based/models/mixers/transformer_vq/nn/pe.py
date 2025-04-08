@@ -2,7 +2,7 @@ import dataclasses
 import torch
 import torch.nn as nn
 
-from transformer_vq.nn.types import TransformerConfig
+from based.models.mixers.transformer_vq.nn.types import TransformerConfig
 
 
 def get_sinusoid_embs(length, width, lam, flip, start=0):
@@ -39,4 +39,4 @@ class ScaledSin(nn.Module):
         embs = get_sinusoid_embs(
             length=length, start=offset, width=self.d_model, lam=self.pe_lam, flip=False
         )  # UD
-        return (self.scale * embs).to(self.dtype)
+        return (self.scale * embs)

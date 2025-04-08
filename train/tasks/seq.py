@@ -142,12 +142,34 @@ class SequenceModel(LightningModule):
             parameters = self.parameters() # [21-09-08] AG: this will train task specific parameters such as Retrieval head for AAN
         optimizer = hydra.utils.instantiate(self.cfg.train.optimizer, parameters)
 
+        # # 获取模型的所有参数
+        # model_params = set(self.model.parameters())
+
+        # # 获取优化器管理的所有参数
+        # optimizer_params = set()
+        # for group in optimizer.param_groups:
+        #     optimizer_params.update(group['params'])
+
+        # # 检查是否有参数未被优化器管理
+        # missing_params = model_params - optimizer_params
+        # if missing_params:
+        #     print(f"以下参数未被优化器管理: {missing_params}")
+        # else:
+        #     print("所有参数均被优化器管理")
+
+        # print(self.model)
+        # for name, param in self.model.named_parameters():
+        #     print(name, param.shape)
+
         # Log optimizer info
         for i, g in enumerate(optimizer.param_groups):
             ntensors = len(g['params'])
             nparams = sum(p.numel() for p in g['params'])
             hparams = {k: v for k, v in g.items() if k != 'params'}
             logger.info(f'Optimizer group {i}: {ntensors} tensors, {nparams} parameters, {hparams}')
+
+            # for p in g['params']:
+            #     print(p.shape)
 
         if 'scheduler' not in self.cfg.train:
             return optimizer
@@ -177,16 +199,20 @@ class SequenceModel(LightningModule):
 
 
 class SequenceLMModel(SequenceModel):
-    def init_vq_state(self, batch_size:int):
+    def __init__(self, cfg, **kwargs):
+        super().__init__(cfg, **kwargs)
+        self.c_beta = self.get_c_beta()
+
+    def init_vq_state(self, batch_size:int, device):
         for layer in self.model.transformer.layers:
-            if layer.__class__.__name__ == 'TransVQAttention':
-                layer.initial_state(batch_size)
+            if layer.mixer.__class__.__name__ == 'TransVQAttention':
+                layer.mixer.initial_state(batch_size, device)
 
     def get_vq_loss_metrics(self):
         vq_loss_metrics = []
         for layer in self.model.transformer.layers:
-            if layer.__class__.__name__ == 'TransVQAttention':
-                vq_loss_metrics.append(layer.vq_loss_metrics)
+            if layer.mixer.__class__.__name__ == 'TransVQAttention':
+                vq_loss_metrics.append(layer.mixer.vq_loss_metrics)
 
         vq_loss_metrics = average_nested_dicts(vq_loss_metrics)
 
@@ -199,8 +225,8 @@ class SequenceLMModel(SequenceModel):
         c_beta = None
 
         for layer in self.model.transformer.layers:
-            if layer.__class__.__name__ == 'TransVQAttention':
-                c_beta = layer.c_beta
+            if layer.mixer.__class__.__name__ == 'TransVQAttention':
+                c_beta = layer.mixer.c_beta
                 break
 
         return c_beta
@@ -211,7 +237,7 @@ class SequenceLMModel(SequenceModel):
         else:
             x, y = batch
 
-        self.init_vq_state(x.shape[0])
+        self.init_vq_state(x.shape[0], x.device)
 
         output = self.forward(x).logits
         output = rearrange(output, '... C -> (...) C')
@@ -244,8 +270,7 @@ class SequenceLMModel(SequenceModel):
         self.log_dict({f"{phase}/{k}": v for k, v in vq_metrics_dict.items()},
                       on_step=log_on_step, on_epoch=True, prog_bar=False, sync_dist=True)
         
-        c_beta = self.get_c_beta()
-        total_loss = loss + c_beta * vq_loss_dict['l_commit'] + vq_loss_dict['l_codebook']
+        total_loss = loss + self.c_beta * vq_loss_dict['l_commit'] + vq_loss_dict['l_codebook']
         return {"loss": total_loss, "output": output, "targets": targets}
 
 

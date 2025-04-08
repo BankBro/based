@@ -6,9 +6,9 @@ import torch.nn.functional as F
 import dataclasses
 from dataclasses import dataclass, fields
 
-from transformer_vq.nn.grad import sg
-from transformer_vq.nn.grad import st
-from transformer_vq.nn.types import TransformerConfig
+from based.models.mixers.transformer_vq.nn.grad import sg
+from based.models.mixers.transformer_vq.nn.grad import st
+from based.models.mixers.transformer_vq.nn.types import TransformerConfig
 
 
 @dataclass
@@ -72,11 +72,9 @@ class LearnableVQ(nn.Module):
         self.config = config
         self.apply_config()
 
-        # TODO: self.w_init和init.ones_不优雅
-        self.c_sum = nn.Parameter(self.w_init(
-            torch.empty(self.n_head, self.n_code, self.d_k, dtype=self.param_dtype)))
-        self.c_count = nn.Parameter(init.ones_(
-            torch.empty(self.n_head, self.n_code, dtype=self.param_dtype)))
+        self.c_sum = nn.Parameter(torch.empty(self.n_head, self.n_code, self.d_k))
+        init.xavier_normal_(self.c_sum)
+        self.c_count = nn.Parameter(torch.ones(self.n_head, self.n_code))
 
     def apply_config(self):
         for k, v in dataclasses.asdict(self.config).items():
@@ -152,7 +150,7 @@ class LearnableVQ(nn.Module):
         return l_codebook
     
     @staticmethod
-    def get_quantization_metrics(vecs, vecs_hat, errs2, c_sum, c_count, dtype):
+    def get_quantization_metrics(vecs, vecs_hat, errs2, c_sum, c_count):
         # we'll call stop gradients in the return statement, so no need to call it now
         n_head, n_code = c_count.shape[0], c_count.shape[1]
         eps, errmin, errmax, maskval = 1e-2, 0e1, 1e1, 1e30
@@ -177,9 +175,9 @@ class LearnableVQ(nn.Module):
 
         # elements will have shape [], [H] or [B, H], then we will tree map
         # to avg over heads/device batch items
-        ones = torch.ones([1, n_code, n_code], dtype=torch.float32)
-        up = torch.triu(ones)  # upper triangular ones mask
-        low = torch.tril(ones, diagonal=-1)  # strict lower triangular ones mask
+        ones = torch.ones([1, n_code, n_code], dtype=torch.float32, device=vecs.device)
+        up = torch.triu(ones).to(device=vecs.device)  # upper triangular ones mask
+        low = torch.tril(ones).to(device=vecs.device)  # strict lower triangular ones mask
         
         metrics = dict(
             c_sim_min=torch.amin(low * c_sims + maskval * up, dim=(1, 2)),  # [H]
@@ -203,14 +201,13 @@ class LearnableVQ(nn.Module):
             relative_err_max=torch.max(relative_errs, dim=2).values,  # [B, H]
         )
 
-        return {k: torch.mean(sg(v)).to(dtype=dtype) for k, v in metrics.items()}
+        return {k: torch.mean(sg(v)) for k, v in metrics.items()}
     
     def forward(self, vecs, vq_spec):
         orig_dtype = vecs.dtype
-        vecs_hp = vecs.to(self.param_dtype)
+        vecs_hp = vecs
         c = self.get_codebook()
         z, errs2 = get_shortcodes(vecs=vecs_hp, codebook=c)
-        errs2 = errs2.to(self.dtype)
         
         cz = get_codewords(shortcodes=z, codebook=c)
         cz = cz.to(orig_dtype)
@@ -230,20 +227,19 @@ class LearnableVQ(nn.Module):
                 c_count=self.c_count,
                 c_gamma=self.c_gamma,
                 vq_spec=vq_spec,
-            ).to(self.dtype)
+            )
 
             metrics = self.get_quantization_metrics(
                 vecs=sg(vecs),
                 vecs_hat=sg(vecs_hat),
                 errs2=sg(errs2),
                 c_sum=sg(self.c_sum),
-                c_count=sg(self.c_count),
-                dtype=self.dtype,
+                c_count=sg(self.c_count)
             )
 
         else:
-            l_commit = torch.zeros(dtype=self.dtype)
-            l_codebook = torch.zeros(dtype=self.dtype)
+            l_commit = torch.zeros()
+            l_codebook = torch.zeros()
             metrics = dict()
 
         return dict(

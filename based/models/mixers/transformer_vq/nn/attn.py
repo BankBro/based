@@ -5,14 +5,14 @@ import torch.nn as nn
 import numpy as np
 import torch.nn.functional as F
 
-from transformer_vq.nn.grad import sg
-from transformer_vq.nn.norm import LayerNorm
-from transformer_vq.nn.pe import get_sinusoid_embs
-from transformer_vq.nn.types import TransformerConfig
-from transformer_vq.nn.vq import LearnableVQ
+from based.models.mixers.transformer_vq.nn.grad import sg
+from based.models.mixers.transformer_vq.nn.norm import LayerNorm
+from based.models.mixers.transformer_vq.nn.pe import get_sinusoid_embs
+from based.models.mixers.transformer_vq.nn.types import TransformerConfig
+from based.models.mixers.transformer_vq.nn.vq import LearnableVQ
 
-from transformer_vq.utils.dict import recursive_apply_dict
-from transformer_vq.utils.tools import one_hot_encode, check_dtypes_equal
+from based.models.mixers.transformer_vq.utils.dict import recursive_apply_dict
+from based.models.mixers.transformer_vq.utils.tools import one_hot_encode  # , check_dtypes_equal
 
 MASK_INFTY_APPROX = 1e30  # mask value approximating infinity
 
@@ -24,24 +24,22 @@ class VQAttention(nn.Module):
         self.apply_config()
 
         self.tau = self.d_k ** 0.5
-        self.input_ln = LayerNorm(self.d_model, self.param_dtype)
+        self.input_ln = LayerNorm(self.d_model)
 
         q_ch = self.n_head * self.d_k
         k_ch = self.n_head * self.d_k
         v_ch = self.n_head * self.d_v
 
-        self.q_ln = LayerNorm(self.d_k, self.param_dtype, gain=False, bias=False)
-        self.k_ln = LayerNorm(self.d_k, self.param_dtype, gain=False, bias=False)
+        self.q_ln = LayerNorm(self.d_k, gain=False, bias=False)
+        self.k_ln = LayerNorm(self.d_k, gain=False, bias=False)
 
-        self.q_proj = nn.Linear(self.d_model, q_ch, bias=False, dtype=self.param_dtype)
-        self.kvg_proj = nn.Linear(self.d_model, k_ch + v_ch + v_ch, bias=False, dtype=self.param_dtype)
-        self.r_proj = nn.Linear(self.d_model, k_ch, bias=False, dtype=self.param_dtype)
-        self.res_proj = nn.Linear(v_ch, self.d_model, bias=False, dtype=self.param_dtype)
+        self.q_proj = nn.Linear(self.d_model, q_ch, bias=False)
+        self.kvg_proj = nn.Linear(self.d_model, k_ch + v_ch + v_ch, bias=False)
+        self.r_proj = nn.Linear(self.d_model, k_ch, bias=False)
+        self.res_proj = nn.Linear(v_ch, self.d_model, bias=False)
 
-        self.xl_u = nn.Parameter(torch.empty(q_ch, dtype=self.param_dtype))
-        self.xl_v = nn.Parameter(torch.empty(q_ch, dtype=self.param_dtype))
-        self.b_init(self.xl_u)
-        self.b_init(self.xl_v)
+        self.xl_u = nn.Parameter(torch.zeros(q_ch))
+        self.xl_v = nn.Parameter(torch.zeros(q_ch))
         
         self.quantizer = LearnableVQ(self.config)
         
@@ -53,7 +51,7 @@ class VQAttention(nn.Module):
             setattr(self, k, v)
     
     @staticmethod
-    def initial_state(config, batch_size):
+    def initial_state(config, batch_size, device):
         prefix = (batch_size, config.n_head)
         s = config.n_code
         m = config.mem_len
@@ -61,17 +59,17 @@ class VQAttention(nn.Module):
         d_v = config.d_v
 
         return dict(
-            pos_offset = torch.tensor(0, dtype=torch.int32),
+            pos_offset = torch.tensor(0, dtype=torch.int32, device=device),
             xlcache = dict(
-                z = torch.full((*prefix, m), fill_value=s, dtype=torch.int32),  # invalid z count 0
-                k_hat = torch.zeros((*prefix, m, d_k), dtype=config.param_dtype),
-                v = torch.zeros((*prefix, m, d_v), dtype=config.dtype),
-                doc_ids = torch.zeros((batch_size, m), dtype=torch.int32),
+                z = torch.full((*prefix, m), fill_value=s, dtype=torch.int32, device=device),  # invalid z count 0
+                k_hat = torch.zeros((*prefix, m, d_k), device=device),
+                v = torch.zeros((*prefix, m, d_v), device=device),
+                doc_ids = torch.zeros((batch_size, m), dtype=torch.int32, device=device),
             ),
             aggcache = dict(
-                upper_div_lower = torch.zeros((*prefix, s, d_v), dtype=config.dtype),
-                lower = torch.zeros((*prefix, s), dtype=config.dtype),
-                latest_doc_id = torch.zeros((batch_size,), dtype=torch.int32),
+                upper_div_lower = torch.zeros((*prefix, s, d_v), device=device),
+                lower = torch.zeros((*prefix, s), device=device),
+                latest_doc_id = torch.zeros((batch_size,), dtype=torch.int32, device=device),
             ),
         )
     
@@ -89,9 +87,10 @@ class VQAttention(nn.Module):
     def get_causal_mask(block_len, mem_len, invalid_len, with_locality):
         assert block_len > 0 and mem_len >= 0
         assert invalid_len.ndim == 0
+        device=invalid_len.device
 
-        i = torch.arange(block_len).unsqueeze(-1)  # L1
-        j = torch.arange(mem_len + block_len).unsqueeze(0)  # 1W
+        i = torch.arange(block_len, device=device).unsqueeze(-1)  # L1
+        j = torch.arange(mem_len + block_len, device=device).unsqueeze(0)  # 1W
 
         alloc_mask = j >= invalid_len  # 1W, 排除无效的历史段（如文档分片边界前的无效内容）
         causal_mask = j - mem_len <= i  # LW, 因果掩码
@@ -124,7 +123,7 @@ class VQAttention(nn.Module):
         q = q.view(bsz, present_len, self.n_head, self.d_k)  # BLHK
         q = self.q_ln(q) * (self.tau**-0.5)
         q = q.permute(0, 2, 1, 3)  # BHLK
-        return q.to(self.param_dtype)
+        return q
 
     def get_kvg(self, x_tilde):
         bsz, present_len, _ = x_tilde.shape
@@ -145,24 +144,23 @@ class VQAttention(nn.Module):
         k = k.permute(0, 2, 1, 3)  # BHLK
         v = v.permute(0, 2, 1, 3)  # BHLV
 
-        return k.to(self.param_dtype), v, g
+        return k, v, g
     
-    def get_xl_helpers(self):
+    def get_xl_helpers(self, device):
         # compute helpers for xl biases (z dai et al., 2019)
         xl_r = get_sinusoid_embs(
             length=self.mem_len + self.block_len,
             width=self.d_model,
             lam=self.pe_lam,
             flip=True,
-        ).to(dtype=self.param_dtype)  # (M+L)D=WD
+        ).to(device=device)  # (M+L)D=WD
 
-        # assert xl_r.dtype == self.param_dtype
         xl_r = self.dropsin(xl_r)  # WD
         xl_r = self.r_proj(xl_r)  # (M+L)(H*K)=W(H*K)
 
         xl_r = xl_r.view(self.mem_len + self.block_len, self.n_head, self.d_k)  # WHK
         xl_r = xl_r.transpose(0, 1)  # HWK
-        xl_r = xl_r.to(dtype=self.param_dtype) * (self.tau**-0.5)
+        xl_r = xl_r * (self.tau**-0.5)
 
         xl_u = self.xl_u.view(1, self.n_head, 1, self.d_k) * (self.tau**-0.5)  # 1H1K
         xl_v = self.xl_v.view(1, self.n_head, 1, self.d_k) * (self.tau**-0.5)  # 1H1K
@@ -177,12 +175,12 @@ class VQAttention(nn.Module):
              vq_spec):
         bsz = present_q.shape[0]
         
-        check_dtypes_equal(
-            present_v,
-            state["xlcache"]["v"],
-            state["aggcache"]["upper_div_lower"],
-            state["aggcache"]["lower"],
-        )
+        # check_dtypes_equal(
+        #     present_v,
+        #     state["xlcache"]["v"],
+        #     state["aggcache"]["upper_div_lower"],
+        #     state["aggcache"]["lower"],
+        # )
         assert present_q.shape == (bsz, self.n_head, self.block_len, self.d_k)
         assert present_k.shape == (bsz, self.n_head, self.block_len, self.d_k)
         assert present_v.shape == (bsz, self.n_head, self.block_len, self.d_v)
@@ -198,7 +196,7 @@ class VQAttention(nn.Module):
 
         assert present_z.shape == (bsz, self.n_head, self.block_len)
         assert present_k_hat.shape == (bsz, self.n_head, self.block_len, self.d_k)
-        check_dtypes_equal(present_k_hat, present_k)
+        # check_dtypes_equal(present_k_hat, present_k)
 
         # concatenate sliding window cache k/v onto current block
         xlcache = state["xlcache"]
@@ -218,7 +216,7 @@ class VQAttention(nn.Module):
         assert recent_v.shape == (bsz, self.n_head, W, self.d_v)
 
         # compute xl bias helpers
-        xl_r, xl_u, xl_v = self.get_xl_helpers()  # HWK, 1H1K, 1H1K
+        xl_r, xl_u, xl_v = self.get_xl_helpers(device=present_q.device)  # HWK, 1H1K, 1H1K
 
         # compute aggcache scores
         c = self.quantizer.get_codebook()  # HSK
@@ -232,7 +230,7 @@ class VQAttention(nn.Module):
 
         recent_scores_bd = torch.einsum("bhlk,hwk->bhlw", present_q + xl_v, xl_r)  # BHLW
         recent_scores_bd = self.rel_shift(recent_scores_bd)  # BHLW
-        recent_scores_bd *= self.get_causal_mask(
+        recent_scores_bd = recent_scores_bd * self.get_causal_mask(
             block_len=self.block_len,
             mem_len=self.mem_len,
             invalid_len=torch.relu(self.mem_len - state["pos_offset"]),
@@ -255,8 +253,8 @@ class VQAttention(nn.Module):
         assert max_scores.shape == (bsz, self.n_head, self.block_len)
         cache_scores -= max_scores.unsqueeze(-1)  # BHLS
         recent_scores -= max_scores.unsqueeze(-1)  # BHLW
-        cache_a = torch.exp(cache_scores).type(self.dtype)  # BHLS
-        recent_a = torch.exp(recent_scores).type(self.dtype)  # BHLW
+        cache_a = torch.exp(cache_scores)  # BHLS
+        recent_a = torch.exp(recent_scores)  # BHLW
         assert cache_a.shape == (bsz, self.n_head, self.block_len, self.n_code)
         assert recent_a.shape == (bsz, self.n_head, self.block_len, W)
 
@@ -315,7 +313,7 @@ class VQAttention(nn.Module):
             num_classes=self.n_code,
             dtype=recent_z.dtype,
             device=recent_z.device,
-        ).to(dtype=self.dtype)  # BHLS
+        )  # BHLS
         new_lower = aggcache["lower"] + torch.sum(delta, dim=-2)  # BHS + BHS, 码本命中计数
 
 		# compute updated upper cache variable (stored in relative format for stability)
@@ -366,7 +364,7 @@ class VQAttention(nn.Module):
         res = self.dropres(res)  # BLD
 
         assert res.shape == x.shape, f"Expected shape {x.shape}, got {res.shape}"
-        check_dtypes_equal(res, x)
+        # check_dtypes_equal(res, x)
 
         new_state = self.update_state(
             recent_z=attn_output_dict.get("recent_z"),  # BHW

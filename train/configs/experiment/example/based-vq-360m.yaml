@@ -6,7 +6,7 @@ datamodule:
   batch_size: 2  # per gpu
   batch_size_eval: 4
 
-expt_name: 04-02-based-360m
+expt_name: 04-07-based-vq-360m
 name: ${.expt_name}
 
 callbacks:
@@ -17,14 +17,14 @@ model:
   config:
     alt_mixer_2:
       _target_: based.models.mixers.transformer_vq.nn.model.TransVQAttention
-      param_dtype: torch.float32
-      dtype: torch.float32
+      # param_dtype: torch.float32
+      # dtype: torch.float32
       block_len: 256
       mem_len: 256
       grad_thru_cache: True
       agg_cache: True
       d_k: 128
-      d_v: 4096
+      d_v: 512
       n_head: 1
       n_code: 512
       pe_lam: 10000
@@ -34,3 +34,4 @@ model:
       c_beta: 0.0001
       c_gamma: 0.99
       is_train: True
+      n_device: 1
