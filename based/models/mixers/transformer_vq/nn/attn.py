@@ -348,7 +348,6 @@ class VQAttention(nn.Module):
         return new_state
 
     def forward(self, state, input_dict):
-        # TODO: 检查漏掉的assert
         doc_ids = input_dict.pop("doc_ids")  # BL
         vq_spec = input_dict.pop("vq_spec")
         x = input_dict.pop("input_features")  # BLD, 是否已经有位置编码了???TODO

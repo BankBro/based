@@ -67,7 +67,7 @@ def sample(logits, top_k=1, top_p=0.0, temperature=1.0):
         logits: Tensor of shape (batch_size, vocab_size)
     """
     if top_k == 1:  # Short-circuit for greedy decoding
-        return logits.argmax(dim=-1)
+        return logits.argmax(dim=-1)  # (B,)
     else:
         if top_p > 0.0:
             assert top_p <= 1.0, "top-p should be in (0, 1]."
@@ -151,6 +151,8 @@ def decode(
             )
         else:
             position_ids = None
+        
+        print(f"cg: {cg}")
         if not cg or not decoding:
             logits = model(
                 input_ids,
@@ -164,13 +166,13 @@ def decode(
             ).squeeze(dim=1)
         return logits[..., :vocab_size] if vocab_size is not None else logits
 
-    def sample_tokens(logits, inference_params):
+    def sample_tokens(logits, inference_params):  # logits: BC
         if teacher_outputs is None or teacher_output_len <= inference_params.seqlen_offset:
             token = sample(logits, top_k=top_k, top_p=top_p, temperature=temperature)
         else:
             token = teacher_outputs[:, inference_params.seqlen_offset]
         # return rearrange(token, "b -> b 1")
-        return token.unsqueeze(1)
+        return token.unsqueeze(1)  # B1
 
     def should_stop(current_token, inference_params):
         if inference_params.seqlen_offset == 0:
@@ -188,7 +190,7 @@ def decode(
         if tensor_parallel > 1:
             torch.distributed.barrier()
         start.record()
-    scores, sequences = [], [input_ids]
+    scores, sequences = [], [input_ids]  # [BC, BC, BC, ...], [B1, B1, B1, ...]
 
     while not should_stop(sequences[-1], inference_params):
         scores.append(get_logits(sequences[-1], inference_params))

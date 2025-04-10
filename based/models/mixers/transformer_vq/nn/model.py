@@ -178,7 +178,7 @@ class TransVQAttention(nn.Module):
             loss_mask=loss_mask  # FBL
         )
 
-    def forward(self, inputs):
+    def forward(self, inputs, inference_params, *args, **kwargs):
         """inputs: BUD, 输入长度T默认等于U, 下面用U代替T"""
         assert inputs.shape[1] % self.block_len == 0
 

@@ -6,7 +6,7 @@ datamodule:
   batch_size: 2  # per gpu
   batch_size_eval: 4
 
-expt_name: 04-07-based-vq-360m
+expt_name: 04-09-based-vq-360m
 name: ${.expt_name}
 
 callbacks:

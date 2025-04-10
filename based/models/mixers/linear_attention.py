@@ -146,10 +146,10 @@ class LinearAttention(nn.Module):
             else:  
                 # prefill
                 y, kv_state, k_state = self.parallel_forward(hidden_states, q, k, v)  # BLD, BH1D'(1+F+F*F), BH11(1+F+F*F)
-                print("kv_state: ", kv_state.shape)
-                print("k_state: ", k_state.shape)
-                print("qkv:", q.shape, k.shape, v.shape)
-                print("y: ", y.shape)
+                # print("kv_state: ", kv_state.shape)
+                # print("k_state: ", k_state.shape)
+                # print("qkv:", q.shape, k.shape, v.shape)
+                # print("y: ", y.shape)
                 if self.layer_idx in inference_params.key_value_memory_dict:
                     # # update the state in-place when graph caching is enabled
                     inference_params.key_value_memory_dict[self.layer_idx][0].copy_(kv_state)
