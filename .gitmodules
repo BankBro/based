@@ -6,7 +6,7 @@
 	url = https://github.com/HazyResearch/zoology.git
 [submodule "evaluate"]
 	path = evaluate
-	url = https://github.com/HazyResearch/based-evaluation-harness
+	url = https://github.com/BankBro/based-evaluation-harness.git
 [submodule "based/models/flash-attention"]
 	path = based/models/flash-attention
 	url = https://github.com/Dao-AILab/flash-attention.git
