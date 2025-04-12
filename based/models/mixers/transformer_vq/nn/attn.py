@@ -352,6 +352,8 @@ class VQAttention(nn.Module):
         vq_spec = input_dict.pop("vq_spec")
         x = input_dict.pop("input_features")  # BLD, 是否已经有位置编码了???TODO
 
+        self.block_len = self.config.block_len if self.training else x.shape[1]
+
         x_tilde = self.input_ln(x)  # BLD
         q = self.get_q(x_tilde=x_tilde)  # BHLK
         k, v, g = self.get_kvg(x_tilde=x_tilde)  # BHLK, BHLV, BL(H*V)

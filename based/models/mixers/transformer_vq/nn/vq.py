@@ -204,6 +204,8 @@ class LearnableVQ(nn.Module):
         return {k: torch.mean(sg(v)) for k, v in metrics.items()}
     
     def forward(self, vecs, vq_spec):
+        self.block_len = self.config.block_len if self.training else vecs.shape[2]
+
         orig_dtype = vecs.dtype
         vecs_hp = vecs
         c = self.get_codebook()

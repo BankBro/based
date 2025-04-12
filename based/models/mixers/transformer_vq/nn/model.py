@@ -76,6 +76,7 @@ class TransformerLayer(nn.Module):
             state: [attn1_states, attn2_states]
             vq_spec: n_device(F1), n_block_per_update(F1), loss_mask(FBL)
         """
+        self.block_len = self.config.block_len if self.training else x.shape[2]
         F, B, L, D = x.shape[0], x.shape[1], self.block_len, self.d_model
 
         check_tensor_shape(x, (F, B, L, D))
@@ -180,6 +181,8 @@ class TransVQAttention(nn.Module):
 
     def forward(self, inputs, inference_params, *args, **kwargs):
         """inputs: BUD, 输入长度T默认等于U, 下面用U代替T"""
+        self.block_len = self.config.block_len if self.training else inputs.shape[1]
+
         assert inputs.shape[1] % self.block_len == 0
 
         B, U = inputs.shape[0], inputs.shape[1]
