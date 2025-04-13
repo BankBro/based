@@ -1,0 +1,37 @@
+# @package _global_
+defaults:
+  - /experiment/example/based-360m.yaml
+
+datamodule:
+  batch_size: 2  # per gpu
+  batch_size_eval: 4
+
+expt_name: 04-13-based-vq-360m
+name: ${.expt_name}
+
+callbacks:
+  model_checkpoint:
+    dirpath: /home/lyj/project/based/checkpoints/${expt_name}
+
+model:
+  config:
+    alt_mixer_2:
+      _target_: based.models.mixers.transformer_vq.nn.model.TransVQAttention
+      # param_dtype: torch.float32
+      # dtype: torch.float32
+      block_len: 256
+      mem_len: 256
+      grad_thru_cache: True
+      agg_cache: True
+      d_k: 256
+      d_v: 1024
+      n_head: 1
+      n_code: 512
+      pe_lam: 10000
+      p_dropsin: 0.1
+      p_dropres: 0.1
+      p_droplyr: 0.1
+      c_beta: 0.0005
+      c_gamma: 0.99
+      is_train: True
+      n_device: 1
