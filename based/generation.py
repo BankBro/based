@@ -152,7 +152,7 @@ def decode(
         else:
             position_ids = None
         
-        print(f"cg: {cg}")
+        # print(f"cg: {cg}")  # False
         if not cg or not decoding:
             logits = model(
                 input_ids,
@@ -182,6 +182,11 @@ def decode(
         if inference_params.seqlen_offset >= max_length - 1:
             return True
         return False
+    
+    def init_vq_state(model, batch_size:int, device):
+        for layer in model.transformer.layers:
+            if layer.mixer.__class__.__name__ == 'TransVQAttention':
+                layer.mixer.initial_state(batch_size, device)
 
     start = torch.cuda.Event(enable_timing=enable_timing)
     end = torch.cuda.Event(enable_timing=enable_timing)
@@ -193,6 +198,7 @@ def decode(
     scores, sequences = [], [input_ids]  # [BC, BC, BC, ...], [B1, B1, B1, ...]
 
     while not should_stop(sequences[-1], inference_params):
+        init_vq_state(model, batch_size, input_ids.device)
         scores.append(get_logits(sequences[-1], inference_params))
         inference_params.seqlen_offset += sequences[-1].shape[1]
         sequences.append(sample_tokens(scores[-1], inference_params))
