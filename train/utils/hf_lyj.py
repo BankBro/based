@@ -7,7 +7,7 @@ from transformers.utils.hub import cached_file
 
 
 def save_as_hf_model(
-    wandb_path: str="bankbro-massachusetts-institute-of-technology/based/04-09-based-vq-360m"
+    wandb_path: str="bankbro-massachusetts-institute-of-technology/based/04-14-1-based-vq-360m"
 ):
     import wandb
     import hydra

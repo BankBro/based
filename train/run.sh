@@ -4,7 +4,7 @@
 THRESHOLD=0.9
 
 # 定义要执行的命令
-COMMAND_TO_RUN="HF_HUB_ENABLE_HF_TRANSFER=1 HF_ENDPOINT=https://hf-mirror.com HYDRA_FULL_ERROR=1 python run.py experiment=example/04-13-based-vq-360m trainer.devices=1"
+COMMAND_TO_RUN="HF_HUB_ENABLE_HF_TRANSFER=1 HF_ENDPOINT=https://hf-mirror.com HYDRA_FULL_ERROR=1 python run.py experiment=example/04-14-1-based-vq-360m trainer.devices=1"
 
 # 检查GPU利用率的函数
 check_gpu_utilization() {
