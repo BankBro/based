@@ -214,6 +214,9 @@ class SequenceLMModel(SequenceModel):
             if layer.mixer.__class__.__name__ == 'TransVQAttention':
                 vq_loss_metrics.append(layer.mixer.vq_loss_metrics)
 
+        if vq_loss_metrics == []:
+            return None, None
+        
         vq_loss_metrics = average_nested_dicts(vq_loss_metrics)
 
         vq_metrics_dict = vq_loss_metrics.pop('metrics')
@@ -251,7 +254,6 @@ class SequenceLMModel(SequenceModel):
         # Passing the loss to the perplexity metrics to avoid recomputation
         metrics = getattr(self, f'{phase}_metrics')
         metrics(output, targets, loss=loss)
-        vq_loss_dict, vq_metrics_dict = self.get_vq_loss_metrics()
         
         log_on_step = 'eval' in self.cfg and self.cfg.eval.get('log_on_step', False) and phase == 'train'
 
@@ -265,12 +267,20 @@ class SequenceLMModel(SequenceModel):
         self.log_dict(metrics, on_step=log_on_step, on_epoch=True, prog_bar=True, sync_dist=True)
 
         # Log VQ metrics
-        self.log_dict({f"{phase}/{k}": v for k, v in vq_loss_dict.items()},
-                      on_step=log_on_step, on_epoch=True, prog_bar=False, sync_dist=True)
-        self.log_dict({f"{phase}/{k}": v for k, v in vq_metrics_dict.items()},
-                      on_step=log_on_step, on_epoch=True, prog_bar=False, sync_dist=True)
+        vq_loss_dict, vq_metrics_dict = self.get_vq_loss_metrics()
         
-        total_loss = loss + self.c_beta * vq_loss_dict['l_commit'] + vq_loss_dict['l_codebook']
+        if vq_loss_dict is not None:
+            self.log_dict({f"{phase}/{k}": v for k, v in vq_loss_dict.items()},
+                        on_step=log_on_step, on_epoch=True, prog_bar=False, sync_dist=True)
+            total_loss = loss + self.c_beta * vq_loss_dict['l_commit'] + vq_loss_dict['l_codebook']
+        else:
+            total_loss = loss
+            
+        if vq_metrics_dict is not None:
+            self.log_dict({f"{phase}/{k}": v for k, v in vq_metrics_dict.items()},
+                        on_step=log_on_step, on_epoch=True, prog_bar=False, sync_dist=True)
+        
+        
         return {"loss": total_loss, "output": output, "targets": targets}
 
 

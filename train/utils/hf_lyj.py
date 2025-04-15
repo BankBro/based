@@ -1,14 +1,13 @@
 """ Source: https://github.com/state-spaces/mamba/blob/main/mamba_ssm/utils/hf.py """
 import os
 import json
+import argparse
 import torch
 from transformers.utils import WEIGHTS_NAME, CONFIG_NAME
 from transformers.utils.hub import cached_file
 
 
-def save_as_hf_model(
-    wandb_path: str="bankbro-massachusetts-institute-of-technology/based/04-14-1-based-vq-360m"
-):
+def save_as_hf_model(wandb_path: str=None):
     import wandb
     import hydra
 
@@ -69,4 +68,11 @@ def _unflatten_dict(d: dict) -> dict:
     return result
 
 if __name__ == "__main__":
-    save_as_hf_model()
+    parser = argparse.ArgumentParser(description="Save a model from WandB to Hugging Face format.")
+    parser.add_argument("experiment_name", type=str, help="Experiment name.")  # 位置参数
+    args = parser.parse_args()
+
+    wandb_path = f"bankbro-massachusetts-institute-of-technology/based/{args.experiment_name}"
+    print(f"Wandb path: {wandb_path}")
+
+    save_as_hf_model(wandb_path=wandb_path)
