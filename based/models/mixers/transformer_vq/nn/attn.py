@@ -207,7 +207,8 @@ class VQAttention(nn.Module):
 
 
         recent_z = torch.cat([xlcache["z"], present_z], dim=-1)  # BH(M+L)=BHW
-        recent_k_hat = torch.cat([xlcache["k_hat"], present_k_hat], dim=-2)  # BH(M+L)K=BHWK
+        # recent_k_hat = torch.cat([xlcache["k_hat"], present_k_hat], dim=-2)  # BH(M+L)K=BHWK
+        recent_k_hat = torch.cat([xlcache["k_hat"], present_k], dim=-2)  # BH(M+L)K=BHWK  使用原始k
         recent_v = torch.cat([xlcache["v"], present_v], dim=-2)  # BH(M+L)V=BHWV
         recent_doc_ids = torch.cat([xlcache["doc_ids"], present_doc_ids], dim=-1)  # B(M+L)=BW
         W = self.mem_len + self.block_len

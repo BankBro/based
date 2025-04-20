@@ -1,6 +1,6 @@
 #!/bin/bash
 
-experiment_name="04-17-based-360m"
+experiment_name="04-20-based-360m"
 
 # 定义GPU利用率阈值
 THRESHOLD=0.9
