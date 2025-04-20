@@ -1,8 +1,8 @@
 #!/bin/bash
 
-experiment_name="04-15-based-360m"
+experiment_name="04-17-based-360m"
 
-# 定义GPU利用率阈值（例如10%）
+# 定义GPU利用率阈值
 THRESHOLD=0.9
 
 # 定义要执行的命令
