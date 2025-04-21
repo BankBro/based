@@ -1,9 +1,9 @@
 #!/bin/bash
 
-experiment_name="04-20-based-360m"
+experiment_name="04-20-based-vq-360m"
 
 # 定义GPU利用率阈值
-THRESHOLD=0.9
+THRESHOLD=0.1
 
 # 定义要执行的命令
 COMMAND_TO_RUN="HF_HUB_ENABLE_HF_TRANSFER=1 HF_ENDPOINT=https://hf-mirror.com HYDRA_FULL_ERROR=1 python run.py experiment=example/${experiment_name} trainer.devices=1"
