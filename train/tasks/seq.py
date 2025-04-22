@@ -257,7 +257,7 @@ class SequenceLMModel(SequenceModel):
         
         log_on_step = 'eval' in self.cfg and self.cfg.eval.get('log_on_step', False) and phase == 'train'
 
-        # print(f"{batch_idx=},{loss=},{self.trainer.global_step=}")
+        # print(f"{phase=},{batch_idx=},{loss=},{self.trainer.global_step=},{log_on_step=}")
         self.log(f"{phase}/loss", loss, on_step=log_on_step, on_epoch=True,
                  prog_bar=False, sync_dist=True)
         # https://pytorch-lightning.readthedocs.io/en/stable/visualize/logging_advanced.html#enable-metrics-for-distributed-training
